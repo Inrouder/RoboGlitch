@@ -85,7 +85,9 @@ void home(){
   h+=F("<small>Deutschland: CET-1CEST,M3.5.0/2,M10.5.0/3 | UTC: UTC0 | UK: GMT0BST,M3.5.0/1,M10.5.0/2</small>");
   h+=F("Gesicht-Anteil in Prozent <input type=number name=faceTime min=30 max=90 value=")+String(faceTime)+F(">");
   h+=F("Animationsintensitaet 0-3 <input type=number name=motion min=0 max=3 value=")+String(motionLevel)+F(">");
-  h+=F("<label><input type=checkbox name=night value=1 ")+(nightMode?F("checked"):F(""))+F("> Nachtmodus aktiv (22-7 Uhr)</label>");
+  h+=F("<label><input type=checkbox name=night value=1 ");
+  if(nightMode)h+=F("checked");
+  h+=F("> Nachtmodus aktiv (22-7 Uhr)</label>");
   h+=F("<p><a href='/react?mood=2'>Freude</a> | <a href='/react?mood=5'>Ueberraschung</a> | <a href='/react?mood=7'>Glitch</a></p>");
   h+=F("<button>Speichern und neu starten</button></form>");
   server.send(200,"text/html; charset=utf-8",h);
