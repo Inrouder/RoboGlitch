@@ -27,12 +27,14 @@ unsigned long bootAt=0;
 uint32_t frames=0;
 enum Mode{EYES,TIME,WEATHER,NET};
 Mode current=EYES;
-const uint16_t BG=0x0883,CYAN=0x07FF,PINK=0xF98E,WHITE=0xFFFF;
+const uint16_t BG=0x0000,CYAN=0xFE60,PINK=0xD104,WHITE=0xFFFF;
+uint8_t brightness=75;
+void setBrightness(){analogWrite(TFT_BL,255-brightness);}
 
 void saveConfig(){
   StaticJsonDocument<768> d;
   d["ssid"]=ssid;d["pass"]=pass;d["user"]=otaUser;d["ota"]=otaPass;
-  d["city"]=city;d["lat"]=latitude;d["lon"]=longitude;
+  d["city"]=city;d["lat"]=latitude;d["lon"]=longitude;d["brightness"]=brightness;
   File f=LittleFS.open("/settings.json","w");
   if(f){serializeJson(d,f);f.close();}
 }
@@ -43,7 +45,7 @@ void loadConfig(){
   if(deserializeJson(d,f)==DeserializationError::Ok){
     ssid=d["ssid"].as<String>();pass=d["pass"].as<String>();
     otaUser=d["user"]|String("admin");otaPass=d["ota"].as<String>();
-    city=d["city"]|String("Berlin");latitude=d["lat"]|52.52f;longitude=d["lon"]|13.405f;
+    city=d["city"]|String("Berlin");latitude=d["lat"]|52.52f;longitude=d["lon"]|13.405f;brightness=(uint8_t)constrain((int)(d["brightness"]|75),0,180);
   }f.close();
 }
 String escapeHtml(String v){v.replace("&","&amp;");v.replace("<","&lt;");v.replace(">","&gt;");v.replace("\"","&quot;");return v;}
@@ -68,6 +70,7 @@ void saveHandler(){
   city=server.arg("city");latitude=server.arg("lat").toFloat();longitude=server.arg("lon").toFloat();
   otaUser=server.arg("user");if(!otaUser.length())otaUser="admin";
   if(server.arg("ota").length())otaPass=server.arg("ota");
+  if(server.hasArg("brightness"))brightness=(uint8_t)constrain(server.arg("brightness").toInt(),0,180);
   saveConfig();server.send(200,"text/plain","Gespeichert. Einmaliger Neustart wegen geaenderter WLAN-Einstellungen ...");
   server.client().flush();delay(500);
   Serial.println("Configuration saved: intentional reboot");ESP.restart();
@@ -125,12 +128,14 @@ void centered(const String &s,int y,int size,uint16_t color){
 void eyes(){
   int look=((frames/10)%7)-3;
   bool blink=(frames%101==0 || frames%101==1);
-  tft.fillRoundRect(31,83,73,58,18,CYAN);
-  tft.fillRoundRect(136,83,73,58,18,CYAN);
+  tft.fillTriangle(33,83,102,97,102,138,CYAN);
+  tft.fillTriangle(33,83,33,119,102,138,CYAN);
+  tft.fillTriangle(138,97,207,83,138,138,CYAN);
+  tft.fillTriangle(207,83,207,119,138,138,CYAN);
   if(blink){tft.fillRect(28,105,184,11,BG);}
   else{
-    tft.fillRoundRect(63+look,108,16,24,7,BG);
-    tft.fillRoundRect(167+look,108,16,24,7,BG);
+    tft.fillRoundRect(63+look,108,16,24,3,BG);
+    tft.fillRoundRect(167+look,108,16,24,3,BG);
   }
   tft.drawLine(106,177,135,177,PINK);
   if(frames%37==0)for(int n=0;n<6;n++)tft.drawFastHLine(random(12,190),random(20,215),random(8,36),PINK);
@@ -173,13 +178,13 @@ void setup(){
   bootAt=millis();
   Serial.printf("\\nROBOGLITCH startup | reset: %s | heap: %u bytes\\n",ESP.getResetReason().c_str(),ESP.getFreeHeap());
   randomSeed(ESP.getCycleCount());
-  pinMode(TFT_BL,OUTPUT);digitalWrite(TFT_BL,LOW); // GeekMagic Ultra: active-low backlight
+  pinMode(TFT_BL,OUTPUT);analogWriteRange(255);analogWriteFreq(1000);setBrightness(); // GeekMagic Ultra: active-low backlight
   SPI.begin();
   tft.init(240,240,SPI_MODE3);tft.setRotation(0);tft.invertDisplay(true);tft.fillScreen(BG);
   Serial.println("TFT ST7789 initialized, SPI mode 3, inverted colors, backlight ON");
   centered("ROBOGLITCH",100,2,CYAN);
   if(!LittleFS.begin()){Serial.println("LittleFS failed");}
-  loadConfig();connectNetwork();
+  loadConfig();setBrightness();connectNetwork();
   server.on("/",HTTP_GET,home);
   server.on("/save",HTTP_POST,saveHandler);
   server.on("/status",HTTP_GET,statusHandler);
@@ -193,7 +198,7 @@ void setup(){
 }
 void loop(){
   server.handleClient();if(WiFi.status()==WL_CONNECTED)MDNS.update();
-  if(millis()-lastFrame>=1200){lastFrame=millis();draw();yield();}
+  if(millis()-lastFrame>=500){lastFrame=millis();draw();yield();}
   if(WiFi.status()==WL_CONNECTED && millis()-bootAt>=WEATHER_START_DELAY_MS &&
      (lastWeather==0 || millis()-lastWeather>=WEATHER_POLL_MS)){
     lastWeather=millis();
