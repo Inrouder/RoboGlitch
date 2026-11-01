@@ -24,6 +24,7 @@ jobs:
           mkdir -p dist
           cp docs/index.html docs/manifest.json dist/
           cp .pio/build/roboglitch/firmware.bin dist/firmware.bin
+          sed -i "s/__BUILD_SHA__/${GITHUB_SHA}/g" dist/index.html dist/manifest.json
       - uses: actions/upload-artifact@v4
         with:
           name: RoboGlitch-ESP8266-firmware
