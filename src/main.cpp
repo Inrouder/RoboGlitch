@@ -250,7 +250,7 @@ void setup(){
   randomSeed(ESP.getCycleCount());
   pinMode(TFT_BL,OUTPUT);analogWriteRange(255);analogWriteFreq(1000);setBrightness(); // GeekMagic Ultra: active-low backlight
   SPI.begin();
-  tft.init(240,240,SPI_MODE3);tft.setRotation(0);tft.invertDisplay(true);tft.fillScreen(BG);
+  tft.init(240,240,SPI_MODE3);tft.setRotation(2);tft.invertDisplay(true);tft.fillScreen(BG);
   Serial.println("TFT ST7789 initialized, SPI mode 3, inverted colors, backlight ON");
   centered("ROBOGLITCH",100,2,CYAN);
   if(!LittleFS.begin()){Serial.println("LittleFS failed");}
