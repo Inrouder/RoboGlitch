@@ -33,12 +33,23 @@ enum Mode{EYES,TIME,WEATHER,NET};
 Mode current=EYES;
 const uint16_t BG=0x0000,CYAN=0xFE60,PINK=0xD104,WHITE=0xFFFF;
 uint8_t brightness=75;
+String timezoneRule="CET-1CEST,M3.5.0/2,M10.5.0/3";
+uint8_t faceTime=65, motionLevel=2;
+bool nightMode=true;
+unsigned long nextMoodAt=0;
+unsigned long faceFrameAt=0;
+uint8_t forcedMood=255;
+unsigned long forcedMoodUntil=0;
+void configureClock(){
+  setenv("TZ",timezoneRule.c_str(),1);tzset();
+  if(WiFi.status()==WL_CONNECTED)configTime(0,0,"pool.ntp.org","time.google.com");
+}
 void setBrightness(){analogWrite(TFT_BL,255-brightness);}
 
 void saveConfig(){
   StaticJsonDocument<768> d;
   d["ssid"]=ssid;d["pass"]=pass;d["user"]=otaUser;d["ota"]=otaPass;
-  d["city"]=city;d["lat"]=latitude;d["lon"]=longitude;d["brightness"]=brightness;
+  d["city"]=city;d["lat"]=latitude;d["lon"]=longitude;d["brightness"]=brightness;d["tz"]=timezoneRule;d["faceTime"]=faceTime;d["motion"]=motionLevel;d["night"]=nightMode;
   File f=LittleFS.open("/settings.json","w");
   if(f){serializeJson(d,f);f.close();}
 }
@@ -50,6 +61,10 @@ void loadConfig(){
     ssid=d["ssid"].as<String>();pass=d["pass"].as<String>();
     otaUser=d["user"]|String("admin");otaPass=d["ota"].as<String>();
     city=d["city"]|String("Berlin");latitude=d["lat"]|52.52f;longitude=d["lon"]|13.405f;brightness=(uint8_t)constrain((int)(d["brightness"]|75),0,180);
+    timezoneRule=d["tz"]|String("CET-1CEST,M3.5.0/2,M10.5.0/3");
+    faceTime=(uint8_t)constrain((int)(d["faceTime"]|65),30,90);
+    motionLevel=(uint8_t)constrain((int)(d["motion"]|2),0,3);
+    nightMode=d["night"]|true;
   }f.close();
 }
 String escapeHtml(String v){v.replace("&","&amp;");v.replace("<","&lt;");v.replace(">","&gt;");v.replace("\"","&quot;");return v;}
@@ -66,6 +81,12 @@ void home(){
   h+=F("Stadt<input name='city' value='")+escapeHtml(city)+F("'>Breitengrad<input name='lat' value='")+String(latitude,5)+F("'>Längengrad<input name='lon' value='")+String(longitude,5)+F("'>");
   h+=F("OTA Benutzer<input name='user' value='")+escapeHtml(otaUser)+F("'>OTA Passwort<input type='password' name='ota' placeholder='Unverändert lassen'>");
   h+=F("Helligkeit <input type=number name=brightness min=0 max=180 value=")+String(brightness)+F(">");
+  h+=F("Zeitzone (POSIX): <input name=tz value='")+escapeHtml(timezoneRule)+F("'>");
+  h+=F("<small>Deutschland: CET-1CEST,M3.5.0/2,M10.5.0/3 | UTC: UTC0 | UK: GMT0BST,M3.5.0/1,M10.5.0/2</small>");
+  h+=F("Gesicht-Anteil in Prozent <input type=number name=faceTime min=30 max=90 value=")+String(faceTime)+F(">");
+  h+=F("Animationsintensitaet 0-3 <input type=number name=motion min=0 max=3 value=")+String(motionLevel)+F(">");
+  h+=F("<label><input type=checkbox name=night value=1 ")+(nightMode?F("checked"):F(""))+F("> Nachtmodus aktiv (22-7 Uhr)</label>");
+  h+=F("<p><a href='/react?mood=2'>Freude</a> | <a href='/react?mood=5'>Ueberraschung</a> | <a href='/react?mood=7'>Glitch</a></p>");
   h+=F("<button>Speichern und neu starten</button></form>");
   server.send(200,"text/html; charset=utf-8",h);
 }
@@ -76,6 +97,10 @@ void saveHandler(){
   otaUser=server.arg("user");if(!otaUser.length())otaUser="admin";
   if(server.arg("ota").length())otaPass=server.arg("ota");
   if(server.hasArg("brightness"))brightness=(uint8_t)constrain(server.arg("brightness").toInt(),0,180);
+  if(server.hasArg("tz") && server.arg("tz").length()<100)timezoneRule=server.arg("tz");
+  if(server.hasArg("faceTime"))faceTime=(uint8_t)constrain(server.arg("faceTime").toInt(),30,90);
+  if(server.hasArg("motion"))motionLevel=(uint8_t)constrain(server.arg("motion").toInt(),0,3);
+  nightMode=server.hasArg("night");
   saveConfig();server.send(200,"text/plain","Gespeichert. Einmaliger Neustart wegen geaenderter WLAN-Einstellungen ...");
   server.client().flush();delay(500);
   Serial.println("Configuration saved: intentional reboot");ESP.restart();
@@ -85,6 +110,8 @@ void statusHandler(){
   d["uptime"]=millis()/1000;d["freeHeap"]=ESP.getFreeHeap();d["city"]=city;
   if(isfinite(weatherTemp))d["temperature"]=weatherTemp;
   d["weatherStatus"]=weatherState;d["weatherCode"]=weatherCode;
+  d["timezone"]=timezoneRule;d["mood"]=mood;d["version"]="0.3.0";
+  time_t utc=time(nullptr);if(utc>100000){char buf[32];struct tm* local=localtime(&utc);strftime(buf,sizeof(buf),"%Y-%m-%d %H:%M:%S",local);d["localTime"]=buf;}
   String out;serializeJson(d,out);server.send(200,"application/json",out);
 }
 void connectNetwork(){
@@ -99,7 +126,7 @@ void connectNetwork(){
     Serial.print("Setup AP: ");Serial.println(WiFi.softAPIP());
   }else{
     Serial.print("IP: ");Serial.println(WiFi.localIP());
-    configTime(3600,3600,"pool.ntp.org","time.google.com");
+    configureClock();
     MDNS.begin("roboglitch");
   }
 }
@@ -154,11 +181,13 @@ void drawEyes(){
   // Keep the border and header untouched. Only repaint the face panel.
   tft.fillRect(27,77,186,125,BG);
   tft.drawRoundRect(27,79,186,94,12,PINK);
-  int look=(mood==1?12:(mood==6?-12:((int)(frames/5)%5-2)*2));
-  bool blink=frames%37==0 || mood==4;
+  int look=(mood==1?12:(mood==6?-12:(int)(6.0f*sin(millis()/(motionLevel==3?170.0f:410.0f)))));
+  if(motionLevel==0)look=0;
+  bool blink=(millis()%4700UL)<160UL || mood==4;
   int h=mood==5?52:38;
+  int bob=motionLevel==0?0:(int)(3.0f*sin(millis()/370.0f));
   for(int side=0;side<2;side++){
-    int x=side==0?39:139;
+    int x=(side==0?39:139)+bob;
     if(blink){
       tft.fillRoundRect(x,113,62,5,2,CYAN);
     }else if(mood==2){
@@ -195,8 +224,10 @@ void drawEyes(){
 void draw(){
   unsigned long now=millis();
   // Face remains the primary screen; short rotating data views.
-  uint8_t segment=(now/12000UL)%4;
-  Mode next=(Mode)segment;
+  const unsigned long cycle=60000UL;
+  unsigned long phase=now%cycle;
+  unsigned long faceMs=cycle*faceTime/100UL;
+  Mode next=phase<faceMs?EYES:(phase<faceMs+(cycle-faceMs)/3?TIME:(phase<faceMs+2*(cycle-faceMs)/3?WEATHER:NET));
   static bool first=true;
   static unsigned long lastDrawnMinute=0;
   static float lastDisplayedTemp=NAN;
@@ -210,11 +241,16 @@ void draw(){
     first=false;
   }
   if(current==EYES){
-    if(now-lastMoodAt>2900UL){
-      mood=(mood+1)%8;
-      lastMoodAt=now;
+    if(forcedMood!=255 && (int32_t)(forcedMoodUntil-now)>0){mood=forcedMood;}
+    else if(now>=nextMoodAt){
+      forcedMood=255;
+      mood=(uint8_t)random(0,8);
+      if(weatherCode>=61 && weatherCode<=82 && random(0,3)==0)mood=6;
+      if(WiFi.status()!=WL_CONNECTED)mood=6;
+      nextMoodAt=now+(unsigned long)random(2800,6500);
     }
-    if(switchScene || now-lastFrame>950UL)drawEyes();
+    const unsigned long interval=motionLevel==0?1700:(motionLevel==1?600:(motionLevel==2?260:150));
+    if(switchScene || now-faceFrameAt>=interval){drawEyes();faceFrameAt=now;}
   }else if(current==TIME){
     unsigned long minute=now/60000UL;
     if(switchScene || minute!=lastDrawnMinute){
@@ -256,10 +292,16 @@ void setup(){
   Serial.println("TFT ST7789 initialized, SPI mode 3, inverted colors, backlight ON");
   centered("ROBOGLITCH",100,2,CYAN);
   if(!LittleFS.begin()){Serial.println("LittleFS failed");}
-  loadConfig();setBrightness();connectNetwork();
+  loadConfig();setBrightness();configureClock();connectNetwork();
   server.on("/",HTTP_GET,home);
   server.on("/save",HTTP_POST,saveHandler);
   server.on("/status",HTTP_GET,statusHandler);
+  server.on("/react",HTTP_GET,[](){
+    if(WiFi.status()==WL_CONNECTED && !authorized())return;
+    forcedMood=(uint8_t)constrain(server.arg("mood").toInt(),0,7);
+    forcedMoodUntil=millis()+15000UL;
+    server.send(200,"text/plain","RoboGlitch reaction activated");
+  });
   if(otaPass.length()){
     firmwareUpdater.setup(&server,"/update",otaUser.c_str(),otaPass.c_str());
   }else{
@@ -270,7 +312,13 @@ void setup(){
 }
 void loop(){
   server.handleClient();if(WiFi.status()==WL_CONNECTED)MDNS.update();
-  if(millis()-lastFrame>=450){draw();lastFrame=millis();yield();}
+  if(millis()-lastFrame>=100){draw();lastFrame=millis();yield();}
+  if(nightMode && time(nullptr)>100000){
+    struct tm* now=localtime(nullptr);
+    static uint8_t oldBrightness=255;
+    uint8_t target=(now->tm_hour>=22||now->tm_hour<7)?min((int)brightness,22):brightness;
+    if(target!=oldBrightness){analogWrite(TFT_BL,255-target);oldBrightness=target;}
+  }
   if(WiFi.status()==WL_CONNECTED && millis()-bootAt>=WEATHER_START_DELAY_MS &&
      (lastWeather==0 || millis()-lastWeather>=weatherRetryMs)){
     lastWeather=millis();
