@@ -21,7 +21,7 @@ String ssid,pass,otaUser="admin",otaPass,city="Berlin";
 float latitude=52.52,longitude=13.405,weatherTemp=NAN;
 int weatherCode=-1;
 unsigned long lastWeather=0,lastFrame=0;
-constexpr unsigned long WEATHER_START_DELAY_MS=30000UL;
+constexpr unsigned long WEATHER_START_DELAY_MS=120000UL; // allow stability check before first TLS request
 constexpr unsigned long WEATHER_POLL_MS=900000UL;
 unsigned long bootAt=0;
 uint32_t frames=0;
@@ -137,10 +137,21 @@ void eyes(){
   centered("ROBO // ONLINE",210,1,CYAN);
 }
 void draw(){
-  current=(Mode)((millis()/9000UL)%4);
-  tft.fillScreen(BG);
-  yield();
-  tft.drawRoundRect(5,5,230,230,15,CYAN);
+  Mode next=(Mode)((millis()/9000UL)%4);
+  bool changed=(next!=current);
+  current=next;
+  static bool first=true;
+  if(changed || first){
+    tft.fillScreen(BG);
+    yield();
+    tft.drawRoundRect(5,5,230,230,15,CYAN);
+    first=false;
+  }else if(current==EYES){
+    // Only clear the animated facial region, never the entire display per frame.
+    tft.fillRect(24,75,192,125,BG);
+  }else{
+    return; // Text screens are static until the next scene switch.
+  }
   if(current==EYES)eyes();
   else if(current==TIME){
     time_t now=time(nullptr);struct tm *tm=localtime(&now);
@@ -182,7 +193,7 @@ void setup(){
 }
 void loop(){
   server.handleClient();if(WiFi.status()==WL_CONNECTED)MDNS.update();
-  if(millis()-lastFrame>=300){lastFrame=millis();draw();yield();}
+  if(millis()-lastFrame>=1200){lastFrame=millis();draw();yield();}
   if(WiFi.status()==WL_CONNECTED && millis()-bootAt>=WEATHER_START_DELAY_MS &&
      (lastWeather==0 || millis()-lastWeather>=WEATHER_POLL_MS)){
     lastWeather=millis();
