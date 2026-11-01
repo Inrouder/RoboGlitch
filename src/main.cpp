@@ -118,22 +118,24 @@ void getWeather(){
   int code=http.GET();
   Serial.printf("Weather HTTP %d, free heap %u\n",code,ESP.getFreeHeap());
   if(code==HTTP_CODE_OK){
-    // Filter the response to save RAM on the 80 KB ESP8266 heap.
-    StaticJsonDocument<128> filter;
-    filter["current"]["temperature_2m"]=true;
-    filter["current"]["weather_code"]=true;
-    StaticJsonDocument<384> data;
-    DeserializationError err=deserializeJson(data,http.getStream(),DeserializationOption::Filter(filter));
-    if(!err && !data["current"]["temperature_2m"].isNull()){
-      weatherTemp=data["current"]["temperature_2m"].as<float>();
+    // HTTPClient::getString() handles chunked transfer encoding. Parsing
+    // getStream() directly can incorrectly return Ok with no current object.
+    String payload=http.getString();
+    Serial.printf("Weather body bytes %u, preview: %.100s\n",
+                  (unsigned)payload.length(),payload.c_str());
+    StaticJsonDocument<768> data;
+    DeserializationError err=deserializeJson(data,payload);
+    JsonVariant temp=data["current"]["temperature_2m"];
+    if(!err && temp.is<float>()){
+      weatherTemp=temp.as<float>();
       weatherCode=data["current"]["weather_code"]|-1;
       weatherState="OK";
       weatherRetryMs=WEATHER_POLL_MS;
       Serial.printf("Weather temperature %.1f C\n",weatherTemp);
     }else{
-      weatherState="JSON ERROR";
+      weatherState=err ? String("JSON ")+err.c_str() : "NO TEMPERATURE";
       weatherRetryMs=60000UL;
-      Serial.printf("Weather parse failed: %s\n",err.c_str());
+      Serial.printf("Weather parse/status failed: %s\n",weatherState.c_str());
     }
   }else{
     weatherState="HTTP "+String(code);
