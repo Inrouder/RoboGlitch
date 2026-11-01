@@ -7,9 +7,6 @@ permissions:
   contents: read
   pages: write
   id-token: write
-concurrency:
-  group: pages
-  cancel-in-progress: true
 jobs:
   firmware:
     runs-on: ubuntu-latest
@@ -22,7 +19,7 @@ jobs:
         run: python -m pip install --upgrade platformio
       - name: Build ESP8266 firmware
         run: pio run -e roboglitch
-      - name: Prepare flasher website
+      - name: Prepare web flasher files
         run: |
           mkdir -p dist
           cp docs/index.html docs/manifest.json dist/
@@ -31,9 +28,42 @@ jobs:
         with:
           name: RoboGlitch-ESP8266-firmware
           path: dist/firmware.bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RoboGlitch-WebFlasher
+          path: dist/
+  pages:
+    needs: firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if GitHub Pages is enabled
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          code=$(curl -sS -o /tmp/pages.json -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/pages")
+          if [ "$code" = "200" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          elif [ "$code" = "404" ]; then
+            echo "::notice::GitHub Pages is not enabled. Enable Settings > Pages > Build and deployment > GitHub Actions to publish the flasher."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::GitHub Pages status unavailable (HTTP $code); skipping deploy."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/download-artifact@v4
+        if: steps.check.outputs.enabled == 'true'
+        with:
+          name: RoboGlitch-WebFlasher
+          path: dist
       - uses: actions/configure-pages@v5
+        if: steps.check.outputs.enabled == 'true'
       - uses: actions/upload-pages-artifact@v3
+        if: steps.check.outputs.enabled == 'true'
         with:
           path: dist
-      - name: Deploy site
-        uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v4
+        if: steps.check.outputs.enabled == 'true'
