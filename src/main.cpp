@@ -126,6 +126,7 @@ void eyes(){
 void draw(){
   current=(Mode)((millis()/9000UL)%4);
   tft.fillScreen(BG);
+  yield();
   tft.drawRoundRect(5,5,230,230,15,CYAN);
   if(current==EYES)eyes();
   else if(current==TIME){
@@ -146,8 +147,10 @@ void draw(){
 void setup(){
   Serial.begin(115200);delay(200);
   randomSeed(ESP.getCycleCount());
-  pinMode(TFT_BL,OUTPUT);digitalWrite(TFT_BL,HIGH);
-  tft.init(240,240);tft.setRotation(0);tft.fillScreen(BG);
+  pinMode(TFT_BL,OUTPUT);digitalWrite(TFT_BL,LOW); // GeekMagic Ultra: active-low backlight
+  SPI.begin();
+  tft.init(240,240,SPI_MODE3);tft.setRotation(0);tft.invertDisplay(true);tft.fillScreen(BG);
+  Serial.println("TFT ST7789 initialized, SPI mode 3, inverted colors, backlight ON");
   centered("ROBOGLITCH",100,2,CYAN);
   if(!LittleFS.begin()){Serial.println("LittleFS failed");}
   loadConfig();connectNetwork();
@@ -164,7 +167,7 @@ void setup(){
 }
 void loop(){
   server.handleClient();if(WiFi.status()==WL_CONNECTED)MDNS.update();
-  if(millis()-lastFrame>=130){lastFrame=millis();draw();}
+  if(millis()-lastFrame>=300){lastFrame=millis();draw();yield();}
   if(WiFi.status()==WL_CONNECTED && (lastWeather==0||millis()-lastWeather>900000UL)){
     lastWeather=millis();getWeather();
   }yield();
