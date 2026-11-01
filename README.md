@@ -21,3 +21,6 @@ Die Firmware legt ihre Konfiguration in LittleFS ab. Nutzer sollten bei Versions
 ESP8266EX, 26-MHz-Quarz, 4 MB Flash, vermutlich 240x240 ST7789. Vorläufige Displaypins: SCLK GPIO14, MOSI GPIO13, CS GPIO15, DC GPIO0, RST GPIO2, BL GPIO5. Das wird beim ersten Hardwaretest geprüft. GPIO0/GPIO2/GPIO15 beeinflussen den Bootmodus – keine externen Lasten unüberlegt hinzufügen.
 
 Geplant: getrennte spätere Bewegungselektronik mit Gyro, Motorcontroller, Sensoren. Die bisherige PCB stellt nicht genügend GPIOs und keine robuste Motorstromversorgung bereit.
+
+## GitHub Pages deployment
+Nach der ersten Aktivierung von Pages in den Repository-Einstellungen muss der Workflow **erneut** laufen: Ein früherer erfolgreicher Firmware-Build kann die Pages-Veröffentlichung übersprungen haben. Die Seite wird unter https://inrouder.github.io/RoboGlitch/ bereitgestellt, sobald der Job `pages` erfolgreich `Deploy site` ausgeführt hat.
