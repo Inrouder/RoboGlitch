@@ -21,6 +21,9 @@ String ssid,pass,otaUser="admin",otaPass,city="Berlin";
 float latitude=52.52,longitude=13.405,weatherTemp=NAN;
 int weatherCode=-1;
 unsigned long lastWeather=0,lastFrame=0;
+constexpr unsigned long WEATHER_START_DELAY_MS=30000UL;
+constexpr unsigned long WEATHER_POLL_MS=900000UL;
+unsigned long bootAt=0;
 uint32_t frames=0;
 enum Mode{EYES,TIME,WEATHER,NET};
 Mode current=EYES;
@@ -65,7 +68,9 @@ void saveHandler(){
   city=server.arg("city");latitude=server.arg("lat").toFloat();longitude=server.arg("lon").toFloat();
   otaUser=server.arg("user");if(!otaUser.length())otaUser="admin";
   if(server.arg("ota").length())otaPass=server.arg("ota");
-  saveConfig();server.send(200,"text/plain","Gespeichert. Neustart ...");delay(300);ESP.restart();
+  saveConfig();server.send(200,"text/plain","Gespeichert. Einmaliger Neustart wegen geaenderter WLAN-Einstellungen ...");
+  server.client().flush();delay(500);
+  Serial.println("Configuration saved: intentional reboot");ESP.restart();
 }
 void statusHandler(){
   StaticJsonDocument<384>d;d["name"]="RoboGlitch";d["ip"]=WiFi.localIP().toString();d["rssi"]=WiFi.RSSI();
@@ -91,19 +96,27 @@ void connectNetwork(){
 }
 void getWeather(){
   if(WiFi.status()!=WL_CONNECTED)return;
-  BearSSL::WiFiClientSecure client;client.setInsecure(); // Public read-only weather endpoint; no credentials.
+  if(ESP.getFreeHeap()<22000){Serial.println("Weather: skipped (low heap)");return;}
+  Serial.printf("Weather: requesting, free heap %u bytes\\n", ESP.getFreeHeap());
+  BearSSL::WiFiClientSecure client;
+  client.setInsecure(); // Public read-only weather endpoint; no credentials.
+  client.setBufferSizes(512,512);
+  client.setTimeout(4000);
   HTTPClient http;
   String url=String("https://api.open-meteo.com/v1/forecast?latitude=")+String(latitude,4)+
     "&longitude="+String(longitude,4)+"&current=temperature_2m,weather_code";
   if(!http.begin(client,url))return;
-  http.setTimeout(6000);
-  if(http.GET()==HTTP_CODE_OK){
+  http.setTimeout(4000);
+  int response=http.GET();
+  Serial.printf("Weather: HTTP %d, free heap %u bytes\\n",response,ESP.getFreeHeap());
+  if(response==HTTP_CODE_OK){
     StaticJsonDocument<2048>d;
     if(deserializeJson(d,http.getStream())==DeserializationError::Ok){
       weatherTemp=d["current"]["temperature_2m"]|NAN;
       weatherCode=d["current"]["weather_code"]|-1;
     }
   }http.end();
+  yield();
 }
 void centered(const String &s,int y,int size,uint16_t color){
   tft.setTextSize(size);tft.setTextColor(color);int w=s.length()*6*size;
@@ -146,6 +159,8 @@ void draw(){
 }
 void setup(){
   Serial.begin(115200);delay(200);
+  bootAt=millis();
+  Serial.printf("\\nROBOGLITCH startup | reset: %s | heap: %u bytes\\n",ESP.getResetReason().c_str(),ESP.getFreeHeap());
   randomSeed(ESP.getCycleCount());
   pinMode(TFT_BL,OUTPUT);digitalWrite(TFT_BL,LOW); // GeekMagic Ultra: active-low backlight
   SPI.begin();
@@ -168,7 +183,10 @@ void setup(){
 void loop(){
   server.handleClient();if(WiFi.status()==WL_CONNECTED)MDNS.update();
   if(millis()-lastFrame>=300){lastFrame=millis();draw();yield();}
-  if(WiFi.status()==WL_CONNECTED && (lastWeather==0||millis()-lastWeather>900000UL)){
-    lastWeather=millis();getWeather();
-  }yield();
+  if(WiFi.status()==WL_CONNECTED && millis()-bootAt>=WEATHER_START_DELAY_MS &&
+     (lastWeather==0 || millis()-lastWeather>=WEATHER_POLL_MS)){
+    lastWeather=millis();
+    getWeather();
+  }
+  yield();
 }
