@@ -112,7 +112,7 @@ void statusHandler(){
   d["uptime"]=millis()/1000;d["freeHeap"]=ESP.getFreeHeap();d["city"]=city;
   if(isfinite(weatherTemp))d["temperature"]=weatherTemp;
   d["weatherStatus"]=weatherState;d["weatherCode"]=weatherCode;
-  d["timezone"]=timezoneRule;d["mood"]=mood;d["version"]="0.3.0";
+  d["timezone"]=timezoneRule;d["mood"]=mood;d["version"]="0.3.1";
   time_t utc=time(nullptr);if(utc>100000){char buf[32];struct tm* local=localtime(&utc);strftime(buf,sizeof(buf),"%Y-%m-%d %H:%M:%S",local);d["localTime"]=buf;}
   String out;serializeJson(d,out);server.send(200,"application/json",out);
 }
@@ -179,53 +179,92 @@ void centered(const String &s,int y,int size,uint16_t color){
 }
 // Animated states: idle, curious, happy, angry, sleepy, surprised, confused, glitch.
 const char* moodLabel[]={"IDLE","CURIOUS","HAPPY","ANGRY","SLEEPY","SURPRISED","CONFUSED","GLITCH"};
-void drawEyes(){
-  // Keep the border and header untouched. Only repaint the face panel.
-  tft.fillRect(27,77,186,125,BG);
-  tft.drawRoundRect(27,79,186,94,12,PINK);
-  int look=(mood==1?12:(mood==6?-12:(int)(6.0f*sin(millis()/(motionLevel==3?170.0f:410.0f)))));
-  if(motionLevel==0)look=0;
-  bool blink=(millis()%4700UL)<160UL || mood==4;
-  int h=mood==5?52:38;
-  int bob=motionLevel==0?0:(int)(3.0f*sin(millis()/370.0f));
+
+/*
+ * Flicker-free eye renderer:
+ * One reusable 8-bit tile (84 x 64 = 5.3 KB) is assembled in RAM, then
+ * transferred as RGB565 pixels in a single SPI transaction per eye.
+ * No LCD clear command occurs between frames.
+ */
+constexpr int EYE_W=84,EYE_H=64;
+uint8_t previousCaptionMood=255;
+void blitEyeTile(GFXcanvas8 &tile,int16_t screenX,int16_t screenY){
+  static uint16_t scanline[EYE_W];
+  const uint8_t* pixels=tile.getBuffer();
+  if(!pixels)return;
+  static const uint16_t palette[4]={BG,CYAN,PINK,WHITE};
+  tft.startWrite();
+  tft.setAddrWindow(screenX,screenY,EYE_W,EYE_H);
+  for(int row=0;row<EYE_H;row++){
+    const uint8_t* source=pixels+row*EYE_W;
+    for(int col=0;col<EYE_W;col++)scanline[col]=palette[source[col]&3];
+    tft.writePixels(scanline,EYE_W);
+  }
+  tft.endWrite();
+}
+void drawEyes(bool fresh){
+  static GFXcanvas8 tile(EYE_W,EYE_H);
+  if(!tile.getBuffer()){
+    static bool warned=false;
+    if(!warned){Serial.println("EYE TILE: out of memory");warned=true;}
+    return;
+  }
+  unsigned long now=millis();
+  float rate=motionLevel==3?195.0f:440.0f;
+  int look=motionLevel==0?0:(int)(6.0f*sin(now/rate));
+  if(mood==1)look=10;
+  if(mood==6)look=-10;
+  bool blink=((now%4700UL)<155UL)||mood==4;
+  int bob=motionLevel==0?0:(int)(2.0f*sin(now/375.0f));
+
   for(int side=0;side<2;side++){
-    int x=(side==0?39:139)+bob;
+    tile.fillScreen(0); // clears RAM tile, never the visible display
+    int x=7+bob;
+    int y=5;
     if(blink){
-      tft.fillRoundRect(x,113,62,5,2,CYAN);
+      tile.fillRoundRect(x+3,30,66,5,2,1);
     }else if(mood==2){
-      tft.drawRoundRect(x+3,93,56,37,15,CYAN);
-      tft.drawFastHLine(x+12,132,37,PINK);
+      tile.drawRoundRect(x+4,13,62,36,16,1);
+      tile.drawFastHLine(x+15,51,40,2);
     }else if(mood==5){
-      tft.fillRoundRect(x+9,91,42,h,17,CYAN);
-      tft.fillRoundRect(x+25+look/3,108,10,18,5,BG);
+      tile.fillRoundRect(x+12,7,46,48,19,1);
+      tile.fillRoundRect(x+29+look/3,25,11,15,5,0);
     }else{
-      // Angry angular eyes, with color and geometry variation.
-      int slant=mood==3?19:(mood==6?4:10);
+      int h=42;
+      int slope=mood==3?19:(mood==6?5:11);
       if(side==0){
-        tft.fillTriangle(x,96,x+62,96+slant,x+62,96+h,CYAN);
-        tft.fillTriangle(x,96,x,96+h-8,x+62,96+h,CYAN);
+        tile.fillTriangle(x,9,x+69,9+slope,x+69,9+h,1);
+        tile.fillTriangle(x,9,x,9+h-9,x+69,9+h,1);
       }else{
-        tft.fillTriangle(x,96+slant,x+62,96,x,96+h,CYAN);
-        tft.fillTriangle(x+62,96,x+62,96+h-8,x,96+h,CYAN);
+        tile.fillTriangle(x,9+slope,x+69,9,x,9+h,1);
+        tile.fillTriangle(x+69,9,x+69,9+h-9,x,9+h,1);
       }
-      tft.fillRoundRect(x+23+look,110,13,20,2,BG);
+      tile.fillRoundRect(x+27+look,28,12,20,3,0);
     }
+    if(mood==7){
+      for(int i=0;i<3;i++){
+        tile.drawFastHLine(random(3,58),random(12,49),random(10,21),2);
+      }
+    }
+    blitEyeTile(tile,side==0?32:124,87);
+    yield();
   }
-  if(mood==2)tft.drawRoundRect(101,151,38,10,6,PINK);
-  else if(mood==5)tft.drawCircle(120,155,7,PINK);
-  else if(mood==4)tft.drawFastHLine(105,155,30,PINK);
-  else {
-    tft.drawLine(102,155,120,158,PINK);
-    tft.drawLine(120,158,138,155,PINK);
+  if(fresh || previousCaptionMood!=mood){
+    tft.fillRect(86,149,68,20,BG);
+    if(mood==2)tft.drawRoundRect(102,152,36,11,5,PINK);
+    else if(mood==5)tft.drawCircle(120,158,6,PINK);
+    else if(mood==4)tft.drawFastHLine(107,158,26,PINK);
+    else {
+      tft.drawLine(101,154,120,162,PINK);
+      tft.drawLine(120,162,139,154,PINK);
+    }
+    tft.fillRect(40,179,160,15,BG);
+    centered(String("MOOD // ")+moodLabel[mood],181,1,CYAN);
+    previousCaptionMood=mood;
   }
-  if(mood==7){
-    for(int i=0;i<4;i++)tft.drawFastHLine(random(32,190),random(87,149),random(9,26),PINK);
-  }
-  centered(String("MOOD // ")+moodLabel[mood],181,1,CYAN);
 }
 void draw(){
   unsigned long now=millis();
-  // Face remains the primary screen; short rotating data views.
   const unsigned long cycle=60000UL;
   unsigned long phase=now%cycle;
   unsigned long faceMs=cycle*faceTime/100UL;
@@ -233,17 +272,23 @@ void draw(){
   static bool first=true;
   static unsigned long lastDrawnMinute=0;
   static float lastDisplayedTemp=NAN;
-  bool switchScene=first || next!=current;
+  bool switchScene=first||next!=current;
   current=next;
-  if(switchScene){
+  if(first){
     tft.fillScreen(BG);
     tft.drawRoundRect(7,7,226,226,17,PINK);
     tft.drawRoundRect(13,13,214,214,14,CYAN);
     centered("ROBO//GLITCH",23,1,PINK);
     first=false;
   }
+  if(switchScene){
+    // Only change the screen's content window, preserve the border/header.
+    tft.fillRect(20,53,200,151,BG);
+    if(current==EYES)previousCaptionMood=255;
+  }
+
   if(current==EYES){
-    if(forcedMood!=255 && (int32_t)(forcedMoodUntil-now)>0){mood=forcedMood;}
+    if(forcedMood!=255 && (int32_t)(forcedMoodUntil-now)>0)mood=forcedMood;
     else if(now>=nextMoodAt){
       forcedMood=255;
       mood=(uint8_t)random(0,8);
@@ -251,29 +296,36 @@ void draw(){
       if(WiFi.status()!=WL_CONNECTED)mood=6;
       nextMoodAt=now+(unsigned long)random(2800,6500);
     }
-    const unsigned long interval=motionLevel==0?1700:(motionLevel==1?600:(motionLevel==2?260:150));
-    if(switchScene || now-faceFrameAt>=interval){drawEyes();faceFrameAt=now;}
+    const unsigned long interval=motionLevel==0?1100:(motionLevel==1?210:(motionLevel==2?110:75));
+    if(switchScene || now-faceFrameAt>=interval){
+      drawEyes(switchScene);
+      faceFrameAt=now;
+    }
   }else if(current==TIME){
-    unsigned long minute=now/60000UL;
-    if(switchScene || minute!=lastDrawnMinute){
-      lastDrawnMinute=minute;
-      tft.fillRect(22,48,196,148,BG);
-      time_t utc=time(nullptr);struct tm *local=localtime(&utc);
+    time_t utc=time(nullptr);
+    if(switchScene || (utc>100000 && (unsigned long)(utc/60)!=lastDrawnMinute)){
+      lastDrawnMinute=utc>100000?(unsigned long)(utc/60):0;
+      if(!switchScene)tft.fillRect(26,91,188,70,BG);
+      struct tm* local=localtime(&utc);
       char b[16];
       if(utc>100000)strftime(b,sizeof(b),"%H:%M",local);
       else snprintf(b,sizeof(b),"--:--");
-      centered("SYSTEM CLOCK",53,1,PINK);
+      if(switchScene)centered("SYSTEM CLOCK",53,1,PINK);
       centered(b,98,4,CYAN);
-      centered("LOCAL TIME",168,1,PINK);
+      if(switchScene)centered("LOCAL TIME",168,1,PINK);
     }
   }else if(current==WEATHER){
-    if(switchScene || (isfinite(weatherTemp) && (!isfinite(lastDisplayedTemp) || weatherTemp!=lastDisplayedTemp))){
+    bool temperatureChanged=isfinite(weatherTemp)&&
+      (!isfinite(lastDisplayedTemp)||weatherTemp!=lastDisplayedTemp);
+    if(switchScene || temperatureChanged){
       lastDisplayedTemp=weatherTemp;
-      tft.fillRect(22,48,196,148,BG);
-      centered("WEATHER MODULE",50,1,PINK);
-      centered(city.substring(0,18),72,1,WHITE);
+      if(!switchScene)tft.fillRect(24,98,192,52,BG);
+      if(switchScene){
+        centered("WEATHER MODULE",50,1,PINK);
+        centered(city.substring(0,18),72,1,WHITE);
+      }
       centered(isfinite(weatherTemp)?String(weatherTemp,1)+" C":String("--.- C"),104,3,CYAN);
-      centered(weatherState,161,1,PINK);
+      if(switchScene)centered(weatherState,161,1,PINK);
     }
   }else if(switchScene){
     centered("NETWORK",50,1,PINK);
