@@ -1,1 +1,15 @@
-{"name":"RoboGlitch ESP8266","version":"0.1.0","builds":[{"chipFamily":"ESP8266","parts":[{"path":"firmware.bin","offset":0}]}]}
+{
+  "name": "RoboGlitch ESP8266",
+  "version": "0.2.0",
+  "builds": [
+    {
+      "chipFamily": "ESP8266",
+      "parts": [
+        {
+          "path": "firmware.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}
