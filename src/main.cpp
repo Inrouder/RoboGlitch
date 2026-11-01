@@ -61,6 +61,7 @@ void home(){
   h+=F("WLAN SSID<input name='ssid' value='")+escapeHtml(ssid)+F("'>WLAN Passwort<input type='password' name='pass' placeholder='Unverändert lassen'>");
   h+=F("Stadt<input name='city' value='")+escapeHtml(city)+F("'>Breitengrad<input name='lat' value='")+String(latitude,5)+F("'>Längengrad<input name='lon' value='")+String(longitude,5)+F("'>");
   h+=F("OTA Benutzer<input name='user' value='")+escapeHtml(otaUser)+F("'>OTA Passwort<input type='password' name='ota' placeholder='Unverändert lassen'>");
+  h+=F("Helligkeit <input type=number name=brightness min=0 max=180 value=")+String(brightness)+F(">");
   h+=F("<button>Speichern und neu starten</button></form>");
   server.send(200,"text/html; charset=utf-8",h);
 }
