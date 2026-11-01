@@ -106,7 +106,7 @@ void saveHandler(){
   Serial.println("Configuration saved: intentional reboot");ESP.restart();
 }
 void statusHandler(){
-  StaticJsonDocument<384>d;d["name"]="RoboGlitch";d["ip"]=WiFi.localIP().toString();d["rssi"]=WiFi.RSSI();
+  StaticJsonDocument<768>d;d["name"]="RoboGlitch";d["ip"]=WiFi.localIP().toString();d["rssi"]=WiFi.RSSI();
   d["uptime"]=millis()/1000;d["freeHeap"]=ESP.getFreeHeap();d["city"]=city;
   if(isfinite(weatherTemp))d["temperature"]=weatherTemp;
   d["weatherStatus"]=weatherState;d["weatherCode"]=weatherCode;
@@ -314,7 +314,8 @@ void loop(){
   server.handleClient();if(WiFi.status()==WL_CONNECTED)MDNS.update();
   if(millis()-lastFrame>=100){draw();lastFrame=millis();yield();}
   if(nightMode && time(nullptr)>100000){
-    struct tm* now=localtime(nullptr);
+    time_t localEpoch=time(nullptr);
+    struct tm* now=localtime(&localEpoch);
     static uint8_t oldBrightness=255;
     uint8_t target=(now->tm_hour>=22||now->tm_hour<7)?min((int)brightness,22):brightness;
     if(target!=oldBrightness){analogWrite(TFT_BL,255-target);oldBrightness=target;}
