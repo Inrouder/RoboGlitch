@@ -41,8 +41,8 @@ unsigned long faceFrameAt=0;
 uint8_t forcedMood=255;
 unsigned long forcedMoodUntil=0;
 void configureClock(){
-  setenv("TZ",timezoneRule.c_str(),1);tzset();
   if(WiFi.status()==WL_CONNECTED)configTime(0,0,"pool.ntp.org","time.google.com");
+  setenv("TZ",timezoneRule.c_str(),1);tzset();
 }
 void setBrightness(){analogWrite(TFT_BL,255-brightness);}
 
